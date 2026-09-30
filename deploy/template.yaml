@@ -1,0 +1,86 @@
+# AWS SAM template: personal-mcp as a Lambda Function URL + private S3 bucket.
+# Deploy: see deploy/README.md
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  PublicUrl:
+    Type: String
+    Default: ""
+    Description: Function URL (no trailing slash). Empty on the first deploy; set it after and redeploy.
+  SsmPrefix:
+    Type: String
+    Default: /personal-mcp
+  BudgetEmail:
+    Type: String
+    Description: Where to send the cost alert
+
+Resources:
+  TokenBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Suspended }
+
+  McpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: build/
+      Handler: run.sh
+      Runtime: python3.12
+      Architectures: [arm64]
+      MemorySize: 512
+      Timeout: 30
+      ReservedConcurrentExecutions: 5   # cost/abuse cap; set to 0 to switch the server off
+      Layers:
+        # Lambda Web Adapter; check for the latest version number before deploying.
+        - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerArm64:25
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_PORT: "8080"
+          PORT: "8080"
+          PYTHONPATH: /var/task/vendor
+          TOKEN_BACKEND: s3
+          TOKEN_BUCKET: !Ref TokenBucket
+          SSM_PREFIX: !Ref SsmPrefix
+          MCP_PUBLIC_URL: !Ref PublicUrl
+      FunctionUrlConfig:
+        AuthType: NONE        # public URL; access is enforced by OAuth inside the app
+        InvokeMode: BUFFERED
+      Policies:
+        - S3CrudPolicy: { BucketName: !Ref TokenBucket }
+        - Statement:
+            - Effect: Allow
+              Action: [ssm:GetParametersByPath, ssm:GetParameters, ssm:GetParameter]
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/personal-mcp
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/personal-mcp/*
+
+  CostAlarm:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: 2, Unit: USD }
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+          Subscribers:
+            - { SubscriptionType: EMAIL, Address: !Ref BudgetEmail }
+
+Outputs:
+  FunctionUrl:
+    Value: !GetAtt McpFunctionUrl.FunctionUrl
+  Bucket:
+    Value: !Ref TokenBucket

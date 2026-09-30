@@ -1,0 +1,14 @@
+.venv/
+.env
+credentials*.json
+token*.json
+__pycache__/
+*.pyc
+audit.log
+accounts.json
+client_secret*.json
+google_client*.json
+.aws-sam/
+vendor/
+deploy/build/
+CLAUDE.md
