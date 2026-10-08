@@ -37,7 +37,7 @@ Resources:
       Runtime: python3.12
       Architectures: [arm64]
       MemorySize: 512
-      Timeout: 30
+      Timeout: 90
       ReservedConcurrentExecutions: 5   # cost/abuse cap; set to 0 to switch the server off
       Layers:
         # Lambda Web Adapter; check for the latest version number before deploying.
